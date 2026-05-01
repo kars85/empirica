@@ -49,7 +49,7 @@ Release 1.0.0 (Stable):
     </releaseNotes>
     <tags>ai llm epistemic metacognition self-assessment calibration python cli</tags>
     <dependencies>
-      <dependency id="python" version="3.11.0" />
+      <dependency id="python312" version="[3.12.10]" />
     </dependencies>
   </metadata>
   <files>

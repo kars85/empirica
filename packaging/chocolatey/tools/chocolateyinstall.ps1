@@ -5,30 +5,61 @@ $ErrorActionPreference = 'Stop'
 
 $packageName = 'empirica'
 $packageVersion = '1.8.14'
-$url = "https://files.pythonhosted.org/packages/source/e/empirica/empirica-$packageVersion.tar.gz"
-$checksum = '0000000000000000000000000000000000000000000000000000000000000000'  # TODO: Update sha256 after PyPI publish
-$checksumType = 'sha256'
 
 Write-Host "Installing Empirica $packageVersion..." -ForegroundColor Cyan
 
-# Check if Python is installed
-$pythonCmd = Get-Command python -ErrorAction SilentlyContinue
-if (-not $pythonCmd) {
-    Write-Error "Python is not installed or not in PATH. Please install Python 3.11+ first."
-    throw "Python 3.11+ is required"
+function Get-EmpiricaPython {
+    if ($env:EMPIRICA_CHOCO_TEST_PYTHON_EXE) {
+        $candidates = @(
+            @{ Exe = $env:EMPIRICA_CHOCO_TEST_PYTHON_EXE; VersionArgs = @('--version'); PipPrefixArgs = @() }
+        )
+    } else {
+        $candidates = @(
+            @{ Exe = 'py'; VersionArgs = @('-3.12', '--version'); PipPrefixArgs = @('-3.12') },
+            @{ Exe = 'C:\Python312\python.exe'; VersionArgs = @('--version'); PipPrefixArgs = @() },
+            @{ Exe = 'python'; VersionArgs = @('--version'); PipPrefixArgs = @() }
+        )
+    }
+
+    foreach ($candidate in $candidates) {
+        $cmd = Get-Command $candidate.Exe -ErrorAction SilentlyContinue
+        if (-not $cmd) {
+            continue
+        }
+
+        try {
+            $version = & $cmd.Source @($candidate.VersionArgs) 2>&1
+        } catch {
+            continue
+        }
+
+        if ($version -match 'Python 3\.12\.') {
+            return @{
+                Exe = $cmd.Source
+                PipPrefixArgs = $candidate.PipPrefixArgs
+                Version = $version
+            }
+        }
+    }
+
+    throw @"
+Python 3.12 is required for the Chocolatey Empirica package.
+Expected Chocolatey dependency: python312 3.12.10.
+No usable Python 3.12 interpreter was found via 'py -3.12', 'C:\Python312\python.exe', or 'python'.
+"@
 }
 
-# Verify Python version
-$pythonVersion = & python --version 2>&1
-Write-Host "Found: $pythonVersion" -ForegroundColor Green
+$pythonInfo = Get-EmpiricaPython
+Write-Host "Found: $($pythonInfo.Version) at $($pythonInfo.Exe)" -ForegroundColor Green
 
-if ($pythonVersion -notmatch 'Python 3\.(1[1-9]|[2-9]\d)') {
-    Write-Warning "Python 3.11+ is recommended. Found: $pythonVersion"
+if ($env:EMPIRICA_CHOCO_VALIDATE_ONLY -eq '1') {
+    Write-Host "Python prerequisite validation completed." -ForegroundColor Green
+    return
 }
 
 # Install via pip
 Write-Host "Installing Empirica via pip..." -ForegroundColor Cyan
-$pipArgs = @(
+$pipArgs = @($pythonInfo.PipPrefixArgs) + @(
     '-m', 'pip',
     'install',
     '--upgrade',
@@ -37,7 +68,7 @@ $pipArgs = @(
 
 $exitCode = Start-ChocolateyProcessAsAdmin `
     -Statements ($pipArgs -join ' ') `
-    -ExeToRun 'python' `
+    -ExeToRun $pythonInfo.Exe `
     -ValidExitCodes @(0) `
     -WorkingDirectory $env:TEMP
 
