@@ -34,10 +34,18 @@ function Get-EmpiricaPython {
         }
 
         if ($version -match 'Python 3\.12\.') {
+            $scriptsPath = Split-Path -Parent $cmd.Source
+            if ($candidate.PipPrefixArgs.Count -gt 0) {
+                $scriptsPath = 'C:\Python312\Scripts'
+            } elseif ($cmd.Source -match '\\python(?:\.exe)?$') {
+                $scriptsPath = Join-Path (Split-Path -Parent $cmd.Source) 'Scripts'
+            }
+
             return @{
                 Exe = $cmd.Source
                 PipPrefixArgs = $candidate.PipPrefixArgs
                 Version = $version
+                ScriptsPath = $scriptsPath
             }
         }
     }
@@ -63,6 +71,7 @@ $pipArgs = @($pythonInfo.PipPrefixArgs) + @(
     '-m', 'pip',
     'install',
     '--upgrade',
+    '--disable-pip-version-check',
     "empirica==$packageVersion"
 )
 
@@ -73,6 +82,13 @@ $exitCode = Start-ChocolateyProcessAsAdmin `
     -WorkingDirectory $env:TEMP
 
 if ($exitCode -eq 0) {
+    $empiricaExe = Join-Path $pythonInfo.ScriptsPath 'empirica.exe'
+    if (Test-Path $empiricaExe) {
+        Install-BinFile -Name 'empirica' -Path $empiricaExe
+    } else {
+        Write-Warning "Empirica CLI was installed, but '$empiricaExe' was not found for Chocolatey shim creation."
+    }
+
     Write-Host "Empirica installed successfully!" -ForegroundColor Green
     Write-Host ""
     Write-Host "Quick Start:" -ForegroundColor Cyan

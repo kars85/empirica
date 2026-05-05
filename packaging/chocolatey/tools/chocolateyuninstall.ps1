@@ -32,10 +32,18 @@ function Get-EmpiricaPython {
         }
 
         if ($version -match 'Python 3\.12\.') {
+            $scriptsPath = Split-Path -Parent $cmd.Source
+            if ($candidate.PipPrefixArgs.Count -gt 0) {
+                $scriptsPath = 'C:\Python312\Scripts'
+            } elseif ($cmd.Source -match '\\python(?:\.exe)?$') {
+                $scriptsPath = Join-Path (Split-Path -Parent $cmd.Source) 'Scripts'
+            }
+
             return @{
                 Exe = $cmd.Source
                 PipPrefixArgs = $candidate.PipPrefixArgs
                 Version = $version
+                ScriptsPath = $scriptsPath
             }
         }
     }
@@ -51,11 +59,16 @@ if (-not $pythonInfo) {
 
 Write-Host "Found: $($pythonInfo.Version) at $($pythonInfo.Exe)" -ForegroundColor Green
 
+if (Get-Command Uninstall-BinFile -ErrorAction SilentlyContinue) {
+    Uninstall-BinFile -Name 'empirica'
+}
+
 # Uninstall via pip
 $pipArgs = @($pythonInfo.PipPrefixArgs) + @(
     '-m', 'pip',
     'uninstall',
     '-y',
+    '--disable-pip-version-check',
     'empirica'
 )
 
