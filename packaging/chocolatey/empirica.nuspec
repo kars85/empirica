@@ -10,6 +10,10 @@
     <owners>Empirica Team</owners>
     <licenseUrl>https://github.com/nubaeon/empirica/blob/main/LICENSE</licenseUrl>
     <projectUrl>https://github.com/nubaeon/empirica</projectUrl>
+    <packageSourceUrl>https://github.com/Nubaeon/empirica/tree/main/packaging/chocolatey</packageSourceUrl>
+    <projectSourceUrl>https://github.com/Nubaeon/empirica</projectSourceUrl>
+    <docsUrl>https://getempirica.com</docsUrl>
+    <bugTrackerUrl>https://github.com/Nubaeon/empirica/issues</bugTrackerUrl>
     <requireLicenseAcceptance>false</requireLicenseAcceptance>
     <description>
 Empirica is an epistemic self-assessment framework for AI agents. It provides:
