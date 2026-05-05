@@ -4,7 +4,7 @@
 $ErrorActionPreference = 'Stop'
 
 $packageName = 'empirica'
-$packageVersion = '1.8.14'
+$packageVersion = '1.8.20'
 
 Write-Host "Installing Empirica $packageVersion..." -ForegroundColor Cyan
 
