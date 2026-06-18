@@ -135,16 +135,82 @@ def _concepts_from_content(filepath: Path, max_concepts: int = 5) -> list[str]:
     return sorted(concepts)[:max_concepts]
 
 
+def _load_extra_scan_rules(project_root: Path) -> tuple[ScanRule, ...]:
+    """Project-defined scan rules from ``.empirica/project.yaml``.
+
+    The built-in SCAN_RULES are tuned to Empirica's own repo layout
+    (``docs/**``, ``empirica/**/*.py``). A consuming project with docs
+    elsewhere (e.g. a Next.js app with ``web/docs/**`` and ``web/**/CLAUDE.md``)
+    can extend the scan without editing core::
+
+        semantic_scan:
+          extra_globs:
+            - glob: "web/docs/**/*.md"
+              doc_type: web-docs
+              tags: [web, documentation]
+            - glob: "web/**/CLAUDE.md"
+              doc_type: web-instructions
+              tags: [web, instructions]
+
+    Missing file / missing key / malformed entries degrade to no extra rules —
+    this never raises, so a bad config cannot break the scan or staleness check.
+    """
+    config_path = project_root / ".empirica" / "project.yaml"
+    if not config_path.is_file():
+        return ()
+    try:
+        import yaml
+        with open(config_path, encoding="utf-8") as f:
+            config = yaml.safe_load(f) or {}
+    except Exception:
+        return ()
+
+    section = config.get("semantic_scan") if isinstance(config, dict) else None
+    globs = section.get("extra_globs") if isinstance(section, dict) else None
+    if not isinstance(globs, list):
+        return ()
+
+    rules: list[ScanRule] = []
+    for item in globs:
+        if not isinstance(item, dict):
+            continue
+        glob = item.get("glob")
+        if not isinstance(glob, str) or not glob.strip():
+            continue
+        doc_type = item.get("doc_type")
+        if not isinstance(doc_type, str) or not doc_type.strip():
+            doc_type = "documentation"
+        tags = item.get("tags")
+        base_tags = tuple(str(t) for t in tags) if isinstance(tags, list) else ()
+        rules.append(ScanRule(
+            glob=glob,
+            doc_type=doc_type,
+            base_tags=base_tags,
+            extract_docstring=bool(item.get("extract_docstring", False)),
+        ))
+    return tuple(rules)
+
+
+def _effective_scan_rules(project_root: Path) -> tuple[ScanRule, ...]:
+    """Built-in rules plus any project-defined extras.
+
+    Extras are appended LAST so the built-in 'first matching rule wins'
+    precedence is preserved for any overlapping path.
+    """
+    return SCAN_RULES + _load_extra_scan_rules(project_root)
+
+
 def scan_project(project_root: Path) -> dict[str, dict[str, Any]]:
     """Scan a project tree and return the per-file metadata index.
 
     Same shape as the cached SEMANTIC_INDEX.yaml's `index` dict — keys are
     relative paths, values are {tags, doc_type, description?, concepts?}.
-    First matching rule wins per path.
+    First matching rule wins per path. Honors project-defined extra_globs
+    from .empirica/project.yaml (see _load_extra_scan_rules).
     """
     entries: dict[str, dict[str, Any]] = {}
 
-    for rule in SCAN_RULES:
+    for rule in _effective_scan_rules(project_root):
         for filepath in sorted(project_root.glob(rule.glob)):
             if not filepath.is_file():
                 continue
@@ -190,7 +256,7 @@ def newest_source_mtime(project_root: Path) -> float:
     matches the scan exactly.
     """
     newest = 0.0
-    for rule in SCAN_RULES:
+    for rule in _effective_scan_rules(project_root):
         for filepath in project_root.glob(rule.glob):
             if not filepath.is_file():
                 continue
