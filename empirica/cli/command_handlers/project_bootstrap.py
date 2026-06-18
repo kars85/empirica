@@ -32,6 +32,83 @@ def _bootstrap_error_output(output_format: str, error_msg: str, hint: str | None
     return None
 
 
+def _enforce_qdrant_requirement(project_id, output_format) -> bool:
+    """Hard-require a live, populated Qdrant before bootstrapping the session.
+
+    Opt-in via ``EMPIRICA_REQUIRE_QDRANT=true``. When enabled, bootstrap refuses
+    to proceed unless BOTH conditions hold:
+      1. A Qdrant server is reachable (env URL → localhost probe in connection.py)
+      2. The project's docs collection (``project_<id>_docs``) exists with >0 points
+
+    This makes the difference between "Qdrant down" and "Qdrant up but this
+    project is unindexed/contaminated" — the exact failure class the runtime-
+    reporting discipline warns about (infrastructure status != retrieval status).
+
+    Returns True when the requirement is UNMET (an error has been emitted and the
+    caller should stop). Returns False to proceed — including the common no-op
+    case where the flag is unset, so the test suite and headless/CI runs that
+    have no Qdrant are unaffected.
+    """
+    if os.getenv("EMPIRICA_REQUIRE_QDRANT", "").strip().lower() != "true":
+        return False
+
+    hint = (
+        "Start the Qdrant vector server (not the empirica MCP server), then index "
+        "with `empirica project-embed`. To disable this gate, unset "
+        "EMPIRICA_REQUIRE_QDRANT."
+    )
+
+    try:
+        from empirica.core.qdrant.connection import _get_qdrant_client
+        client = _get_qdrant_client()
+    except Exception as e:
+        _bootstrap_error_output(
+            output_format,
+            f"EMPIRICA_REQUIRE_QDRANT=true but the Qdrant client could not be created: {e}",
+            hint,
+        )
+        return True
+
+    if client is None:
+        _bootstrap_error_output(
+            output_format,
+            "EMPIRICA_REQUIRE_QDRANT=true but no Qdrant server is reachable.",
+            hint,
+        )
+        return True
+
+    collection = f"project_{project_id}_docs"
+    try:
+        if not client.collection_exists(collection):
+            _bootstrap_error_output(
+                output_format,
+                f"EMPIRICA_REQUIRE_QDRANT=true but the docs collection "
+                f"'{collection}' does not exist.",
+                hint,
+            )
+            return True
+        points = client.get_collection(collection).points_count or 0
+    except Exception as e:
+        _bootstrap_error_output(
+            output_format,
+            f"EMPIRICA_REQUIRE_QDRANT=true but the docs collection "
+            f"'{collection}' could not be inspected: {e}",
+            hint,
+        )
+        return True
+
+    if points <= 0:
+        _bootstrap_error_output(
+            output_format,
+            f"EMPIRICA_REQUIRE_QDRANT=true but the docs collection "
+            f"'{collection}' has no indexed points.",
+            hint,
+        )
+        return True
+
+    return False
+
+
 def _resolve_project_via_context():
     """Try to resolve project_id via unified context resolver (InstanceResolver).
 
@@ -369,6 +446,12 @@ def handle_project_bootstrap_command(args):
         project_id, err = _auto_detect_project_id(project_id, output_format)
         if err is not None:
             return err
+
+        # Hard Qdrant gate (opt-in via EMPIRICA_REQUIRE_QDRANT=true): stop the
+        # session here unless Qdrant is reachable AND this project's docs
+        # collection is populated. No-op when the flag is unset.
+        if _enforce_qdrant_requirement(project_id, output_format):
+            return None
 
         check_integrity = False  # Disabled: naive parser has false positives. Use pattern matcher instead.
         context_to_inject = getattr(args, 'context_to_inject', False)
